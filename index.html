@@ -1,0 +1,364 @@
+import React, { useState, useEffect } from 'react';
+import { Calculator, AlertTriangle, TrendingUp, DollarSign, PieChart } from 'lucide-react';
+
+const App = () => {
+  // --- State ---
+  const [sales, setSales] = useState(8000000); // 売上
+  const [expenses, setExpenses] = useState(2000000); // 経費
+  const [taxType, setTaxType] = useState('exempt'); // 消費税: exempt(免税), simplified(簡易課税), standard(本則)
+  const [businessType, setBusinessType] = useState('service'); // 簡易課税用: サービス業(第5種)など
+
+  // --- 追加: 控除関連のState ---
+  const [blueDeduction, setBlueDeduction] = useState(650000); // 青色申告特別控除
+  const [otherDeductions, setOtherDeductions] = useState(0); // その他の所得控除
+
+  // --- 計算結果のState ---
+  const [results, setResults] = useState({
+    income: 0,
+    incomeTax: 0,
+    residentTax: 0,
+    healthInsurance: 0,
+    consumptionTax: 0,
+    totalTax: 0,
+    takeHome: 0,
+  });
+
+  // --- 所得税計算ロジック（簡略版・令和の税率ベース） ---
+  const calculateIncomeTax = (taxableIncome) => {
+    if (taxableIncome <= 0) return 0;
+    if (taxableIncome <= 1950000) return taxableIncome * 0.05;
+    if (taxableIncome <= 3300000) return taxableIncome * 0.10 - 97500;
+    if (taxableIncome <= 6950000) return taxableIncome * 0.20 - 427500;
+    if (taxableIncome <= 9000000) return taxableIncome * 0.23 - 636000;
+    if (taxableIncome <= 18000000) return taxableIncome * 0.33 - 1536000;
+    if (taxableIncome <= 40000000) return taxableIncome * 0.40 - 2796000;
+    return taxableIncome * 0.45 - 4796000;
+  };
+
+  // --- 再計算処理 ---
+  useEffect(() => {
+    // 1. 所得の計算（青色申告特別控除を適用）
+    const baseIncome = Math.max(0, sales - expenses - blueDeduction);
+    
+    // 国保の計算(上限あり・ざっくり所得の9%を仮定)
+    const healthInsuranceCalc = Math.min(baseIncome * 0.09, 890000);
+    
+    // 2. 課税所得の計算（基礎控除48万 + 国保料 + その他の控除）
+    const taxableIncome = Math.max(0, baseIncome - 480000 - healthInsuranceCalc - otherDeductions);
+
+    // 3. 各種税金の計算
+    const incomeTax = calculateIncomeTax(taxableIncome); // 所得税
+    const residentTax = taxableIncome * 0.10; // 住民税(ざっくり10%)
+    const healthInsurance = healthInsuranceCalc; // 国保
+
+    // 4. 消費税の計算
+    let consumptionTax = 0;
+    if (taxType === 'standard') {
+      // 本則課税：(売上 - 経費(全て課税対象と仮定)) × 10%
+      consumptionTax = Math.max(0, (sales - expenses) * 0.1);
+    } else if (taxType === 'simplified') {
+      // 簡易課税：売上の10% - (売上の10% × みなし仕入率)
+      const deemedRate = businessType === 'service' ? 0.5 : 0.7; // サービス業50%, 卸小売等70%と仮定
+      consumptionTax = Math.max(0, (sales * 0.1) * (1 - deemedRate));
+    } else if (taxType === 'exempt' && sales > 10000000) {
+      // 警告用：1000万超えてるのに免税を選択している場合（本来は翌々年から課税）
+      // ここではシミュレーションとして0のままだが、アラートを出す
+    }
+
+    const totalTax = incomeTax + residentTax + healthInsurance + consumptionTax;
+    const takeHome = sales - expenses - totalTax;
+
+    setResults({
+      income: baseIncome,
+      incomeTax,
+      residentTax,
+      healthInsurance,
+      consumptionTax,
+      totalTax,
+      takeHome,
+    });
+  }, [sales, expenses, taxType, businessType]);
+
+  // 数値フォーマットヘルパー
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY', maximumFractionDigits: 0 }).format(amount);
+  };
+
+  // カンマ入力用ハンドラー
+  const handleNumberInput = (setter) => (e) => {
+    // 全角数字を半角に変換し、数字以外の文字（カンマなど）を除去
+    const val = e.target.value.replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)).replace(/[^0-9]/g, '');
+    setter(Number(val));
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 md:p-8 font-sans text-gray-800">
+      <div className="max-w-5xl mx-auto space-y-6">
+        
+        {/* ヘッダー */}
+        <header className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <Calculator className="text-blue-600" />
+              節税ダッシュボード
+            </h1>
+            <p className="text-gray-500 text-sm mt-1">スライダーや手入力で、最適な売上と経費のバランスを見つけましょう（※個人事業主・青色申告を想定した概算です）</p>
+          </div>
+        </header>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          
+          {/* 左側: 入力パネル */}
+          <div className="lg:col-span-5 space-y-6">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <h2 className="text-lg font-semibold border-b pb-3 mb-4 flex items-center gap-2">
+                <TrendingUp size={18} className="text-gray-500" /> シミュレーション条件
+              </h2>
+
+              {/* 売上入力・スライダー */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2 flex justify-between items-center">
+                  <span>年間売上 (税抜)</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={sales.toLocaleString()}
+                      onChange={handleNumberInput(setSales)}
+                      className="text-right border border-gray-300 rounded-md p-1.5 w-32 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-bold text-blue-600 outline-none"
+                    />
+                    <span className="text-gray-600 text-sm">円</span>
+                  </div>
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="30000000"
+                  step="500000"
+                  value={sales}
+                  onChange={(e) => setSales(Number(e.target.value))}
+                  className="w-full h-2 bg-blue-100 rounded-lg appearance-none cursor-pointer accent-blue-600 mt-2"
+                />
+                <div className="flex justify-between text-xs text-gray-400 mt-1">
+                  <span>0円</span>
+                  <span>1,000万</span>
+                  <span>2,000万</span>
+                  <span>3,000万</span>
+                </div>
+              </div>
+
+              {/* 経費入力・スライダー */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2 flex justify-between items-center">
+                  <span>年間経費 (税抜)</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={expenses.toLocaleString()}
+                      onChange={handleNumberInput(setExpenses)}
+                      className="text-right border border-gray-300 rounded-md p-1.5 w-32 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-bold text-red-500 outline-none"
+                    />
+                    <span className="text-gray-600 text-sm">円</span>
+                  </div>
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max={sales} // 経費は売上を超えないように制限
+                  step="100000"
+                  value={expenses}
+                  onChange={(e) => setExpenses(Number(e.target.value))}
+                  className="w-full h-2 bg-red-100 rounded-lg appearance-none cursor-pointer accent-red-500 mt-2"
+                />
+              </div>
+
+              {/* 控除設定（追加） */}
+              <div className="space-y-4 pt-4 border-t border-gray-100 mb-6">
+                <h3 className="text-sm font-medium text-gray-700">控除（税金を安くする枠）の設定</h3>
+                
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1">青色申告特別控除</label>
+                  <select
+                    value={blueDeduction}
+                    onChange={(e) => setBlueDeduction(Number(e.target.value))}
+                    className="w-full p-2 border border-gray-300 rounded-lg outline-none text-sm focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="650000">65万円（電子申告など）</option>
+                    <option value="550000">55万円</option>
+                    <option value="100000">10万円</option>
+                    <option value="0">なし（白色申告）</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1 flex justify-between">
+                    <span>その他の所得控除（扶養・生命保険など）</span>
+                    <span className="text-gray-400">※基礎控除48万以外</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={otherDeductions.toLocaleString()}
+                      onChange={handleNumberInput(setOtherDeductions)}
+                      className="text-right border border-gray-300 rounded-md p-1.5 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
+                      placeholder="例: 380000"
+                    />
+                    <span className="text-gray-600 text-sm whitespace-nowrap">円</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 消費税設定 */}
+              <div className="space-y-4 pt-4 border-t border-gray-100">
+                <label className="block text-sm font-medium text-gray-700">消費税の申告方法</label>
+                <select
+                  value={taxType}
+                  onChange={(e) => setTaxType(e.target.value)}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                >
+                  <option value="exempt">免税事業者（売上1000万以下など）</option>
+                  <option value="simplified">簡易課税制度（手軽に申告）</option>
+                  <option value="standard">本則課税（原則的な計算）</option>
+                </select>
+
+                {taxType === 'simplified' && (
+                  <div>
+                    <label className="block text-sm text-gray-600 mb-1 mt-2">事業区分</label>
+                    <select
+                      value={businessType}
+                      onChange={(e) => setBusinessType(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-lg outline-none text-sm"
+                    >
+                      <option value="service">サービス業など (第5種: みなし仕入率50%)</option>
+                      <option value="retail">卸売・小売など (みなし仕入率高め)</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+            </div>
+
+            {/* アラート表示エリア */}
+            {sales >= 10000000 && taxType === 'exempt' && (
+              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-r-lg flex items-start gap-3">
+                <AlertTriangle className="text-yellow-500 flex-shrink-0 mt-0.5" size={20} />
+                <div>
+                  <h4 className="font-medium text-yellow-800 text-sm">売上1,000万円の壁を超えています</h4>
+                  <p className="text-yellow-700 text-xs mt-1">
+                    課税売上高が1,000万円を超えると、翌々年から消費税の納税義務が発生します。設定を「簡易課税」または「本則課税」に変更してシミュレーションしてみてください。
+                  </p>
+                </div>
+              </div>
+            )}
+            
+            {results.takeHome < 0 && (
+              <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg flex items-start gap-3">
+                <AlertTriangle className="text-red-500 flex-shrink-0 mt-0.5" size={20} />
+                <div>
+                  <h4 className="font-medium text-red-800 text-sm">手残りがマイナスです（赤字）</h4>
+                  <p className="text-red-700 text-xs mt-1">経費が多すぎるか、売上が不足しています。</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 右側: 結果ダッシュボード */}
+          <div className="lg:col-span-7 space-y-6">
+            
+            {/* 最終的な手残り金額 */}
+            <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden">
+              <div className="absolute top-0 right-0 -mt-4 -mr-4 text-white opacity-10">
+                <DollarSign size={120} />
+              </div>
+              <p className="text-blue-100 font-medium mb-1 relative z-10">最終的に手元に残るお金（可処分所得）</p>
+              <div className="text-4xl md:text-5xl font-bold tracking-tight relative z-10">
+                {formatCurrency(results.takeHome)}
+              </div>
+              
+              <div className="mt-6 pt-4 border-t border-blue-400/30 flex justify-between text-sm relative z-10">
+                <div>
+                  <span className="text-blue-200 block">税引前利益</span>
+                  <span className="font-semibold">{formatCurrency(sales - expenses)}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-blue-200 block">税金・社会保険料 合計</span>
+                  <span className="font-semibold text-red-200">-{formatCurrency(results.totalTax)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 内訳グラフと詳細 */}
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <h3 className="text-lg font-semibold border-b pb-3 mb-4 flex items-center gap-2">
+                <PieChart size={18} className="text-gray-500" /> お金の流れの内訳
+              </h3>
+
+              {/* プログレスバー風のグラフ */}
+              <div className="h-8 flex rounded-full overflow-hidden mb-6 bg-gray-100">
+                {sales > 0 && (
+                  <>
+                    <div 
+                      style={{ width: `${Math.max(0, (results.takeHome / sales) * 100)}%` }} 
+                      className="bg-blue-500 h-full flex items-center justify-center text-xs text-white font-medium transition-all duration-300"
+                      title="手残り"
+                    ></div>
+                    <div 
+                      style={{ width: `${(expenses / sales) * 100}%` }} 
+                      className="bg-gray-400 h-full flex items-center justify-center text-xs text-white font-medium transition-all duration-300"
+                      title="経費"
+                    ></div>
+                    <div 
+                      style={{ width: `${(results.totalTax / sales) * 100}%` }} 
+                      className="bg-red-400 h-full flex items-center justify-center text-xs text-white font-medium transition-all duration-300"
+                      title="税金等"
+                    ></div>
+                  </>
+                )}
+              </div>
+              
+              <div className="flex gap-4 text-sm mb-6 justify-center">
+                <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-blue-500"></div>手残り</div>
+                <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-gray-400"></div>経費</div>
+                <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-red-400"></div>税金・社保</div>
+              </div>
+
+              {/* 税金の詳細リスト */}
+              <div className="space-y-3">
+                <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                  <span className="text-gray-600 text-sm">所得税（累進課税）</span>
+                  <span className="font-semibold text-gray-900">{formatCurrency(results.incomeTax)}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                  <span className="text-gray-600 text-sm">住民税（約10%）</span>
+                  <span className="font-semibold text-gray-900">{formatCurrency(results.residentTax)}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                  <span className="text-gray-600 text-sm">国民健康保険料（概算）</span>
+                  <span className="font-semibold text-gray-900">{formatCurrency(results.healthInsurance)}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-transparent hover:border-blue-200 transition-colors">
+                  <div className="flex flex-col">
+                    <span className="text-gray-600 text-sm">消費税</span>
+                    <span className="text-xs text-gray-400">
+                      {taxType === 'exempt' ? '免税事業者' : taxType === 'simplified' ? '簡易課税' : '本則課税'}
+                    </span>
+                  </div>
+                  <span className="font-semibold text-gray-900">{formatCurrency(results.consumptionTax)}</span>
+                </div>
+              </div>
+
+              {/* 節税アドバイス TIPS */}
+              <div className="mt-6 p-4 bg-blue-50 text-blue-800 rounded-lg text-sm leading-relaxed">
+                <strong>💡 限界税率の考え方</strong><br />
+                現在のあなたの所得レベルだと、さらに10万円の経費（パソコン購入など）を使った場合、
+                所得税と住民税が約 <strong>{formatCurrency(100000 * ((results.incomeTax > 0 ? 0.1 : 0) + 0.1))}</strong> 安くなる計算です。つまり、実質的な負担額はその分少なくなります。
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default App;
